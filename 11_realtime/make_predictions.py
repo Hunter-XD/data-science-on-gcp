@@ -63,17 +63,17 @@ class FlightsModelInvoker(beam.DoFn):
         from google.cloud import aiplatform
         endpoint_name = 'flights-ch11'
         endpoints = aiplatform.Endpoint.list(
-            filter='display_name="{}"'.format(endpoint_name),
-            order_by='create_time desc'
+            filter=f'display_name="{endpoint_name}"', order_by='create_time desc'
         )
+
         if len(endpoints) == 0:
-            raise EnvironmentError("No endpoint named {}".format(endpoint_name))
-        logging.info("Found endpoint {}".format(endpoints[0]))
+            raise EnvironmentError(f"No endpoint named {endpoint_name}")
+        logging.info(f"Found endpoint {endpoints[0]}")
         self.endpoint = endpoints[0]
 
     def process(self, input_data):
         # call predictions and pull out probability
-        logging.info("Invoking ML model on {} flights".format(len(input_data)))
+        logging.info(f"Invoking ML model on {len(input_data)} flights")
         # drop inputs not needed by model
         features = [x.copy() for x in input_data]
         for f in features:
@@ -95,7 +95,7 @@ def run(project, bucket, region, source, sink):
         ]
         flights_output = '/tmp/predictions'
     else:
-        logging.info('Running in the cloud on full dataset input={}'.format(source))
+        logging.info(f'Running in the cloud on full dataset input={source}')
         argv = [
             '--project={0}'.format(project),
             '--job_name=ch10predictions',
@@ -105,20 +105,21 @@ def run(project, bucket, region, source, sink):
             '--setup_file=./setup.py',
             '--autoscaling_algorithm=THROUGHPUT_BASED',
             '--max_num_workers=8',
-            '--region={}'.format(region),
-            '--runner=DataflowRunner'
+            f'--region={region}',
+            '--runner=DataflowRunner',
         ]
+
         if source == 'pubsub':
             logging.info("Turning on streaming. Cancel the pipeline from GCP console")
             argv += ['--streaming']
-        flights_output = 'gs://{}/flights/ch11/predictions'.format(bucket)
+        flights_output = f'gs://{bucket}/flights/ch11/predictions'
 
     with beam.Pipeline(argv=argv) as pipeline:
 
         # read the event stream
         if source == 'local':
             input_file = './simevents_sample.json'
-            logging.info("Reading from {} ... Writing to {}".format(input_file, flights_output))
+            logging.info(f"Reading from {input_file} ... Writing to {flights_output}")
             events = (
                     pipeline
                     | 'read_input' >> beam.io.ReadFromText(input_file)
@@ -127,15 +128,15 @@ def run(project, bucket, region, source, sink):
         elif source == 'bigquery':
             input_query = ("SELECT EVENT_DATA FROM dsongcp.flights_simevents " +
                            "WHERE EVENT_TIME BETWEEN '2015-03-01' AND '2015-03-02'")
-            logging.info("Reading from {} ... Writing to {}".format(input_query, flights_output))
+            logging.info(f"Reading from {input_query} ... Writing to {flights_output}")
             events = (
                     pipeline
                     | 'read_input' >> beam.io.ReadFromBigQuery(query=input_query, use_standard_sql=True)
                     | 'parse_input' >> beam.Map(lambda row: json.loads(row['EVENT_DATA']))
             )
         elif source == 'pubsub':
-            input_topic = "projects/{}/topics/wheelsoff".format(project)
-            logging.info("Reading from {} ... Writing to {}".format(input_topic, flights_output))
+            input_topic = f"projects/{project}/topics/wheelsoff"
+            logging.info(f"Reading from {input_topic} ... Writing to {flights_output}")
             events = (
                     pipeline
                     | 'read_input' >> beam.io.ReadFromPubSub(topic=input_topic,
@@ -143,7 +144,7 @@ def run(project, bucket, region, source, sink):
                     | 'parse_input' >> beam.Map(lambda s: json.loads(s))
             )
         else:
-            logging.error("Unknown input type {}".format(source))
+            logging.error(f"Unknown input type {source}")
             return
 
         # events -> features.  See ./flights_transforms.py for the code shared between training & prediction
@@ -193,7 +194,7 @@ def run(project, bucket, region, source, sink):
                     )
              )
         else:
-            logging.error("Unknown output type {}".format(sink))
+            logging.error(f"Unknown output type {sink}")
             return
 
 
@@ -210,11 +211,12 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     args = vars(parser.parse_args())
 
-    if args['input'] != 'local':
-        if not args['bucket'] or not args['project'] or not args['region']:
-            print("Project, Bucket, Region are needed in order to run on the cloud on full dataset.")
-            parser.print_help()
-            parser.exit()
+    if args['input'] != 'local' and (
+        not args['bucket'] or not args['project'] or not args['region']
+    ):
+        print("Project, Bucket, Region are needed in order to run on the cloud on full dataset.")
+        parser.print_help()
+        parser.exit()
 
     run(project=args['project'], bucket=args['bucket'], region=args['region'],
         source=args['input'], sink=args['output'])

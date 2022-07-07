@@ -47,17 +47,20 @@ def download(year: str, month: str, destdir: str):
     year e.g.'2015'
     month e.g. '01 for January
     """
-    logging.info('Requesting data for {}-{}-*'.format(year, month))
+    logging.info(f'Requesting data for {year}-{month}-*')
 
-    url = os.path.join(SOURCE,
-                       "On_Time_Reporting_Carrier_On_Time_Performance_1987_present_{}_{}.zip".format(year, int(month)))
-    logging.debug("Trying to download {}".format(url))
+    url = os.path.join(
+        SOURCE,
+        f"On_Time_Reporting_Carrier_On_Time_Performance_1987_present_{year}_{int(month)}.zip",
+    )
 
-    filename = os.path.join(destdir, "{}{}.zip".format(year, month))
+    logging.debug(f"Trying to download {url}")
+
+    filename = os.path.join(destdir, f"{year}{month}.zip")
     with open(filename, "wb") as fp:
         response = urlopen(url)
         fp.write(response.read())
-    logging.debug("{} saved".format(filename))
+    logging.debug(f"{filename} saved")
     return filename
 
 
@@ -72,14 +75,14 @@ def zip_to_csv(filename, destdir):
     os.chdir(cwd)
     csvfile = os.path.join(destdir, zip_ref.namelist()[0])
     zip_ref.close()
-    logging.info("Extracted {}".format(csvfile))
+    logging.info(f"Extracted {csvfile}")
 
     # now gzip for faster upload to bucket
-    gzipped = csvfile + ".gz"
+    gzipped = f"{csvfile}.gz"
     with open(csvfile, 'rb') as ifp:
         with gzip.open(gzipped, 'wb') as ofp:
             shutil.copyfileobj(ifp, ofp)
-    logging.info("Compressed into {}".format(gzipped))
+    logging.info(f"Compressed into {gzipped}")
 
     return gzipped
 
@@ -92,10 +95,10 @@ def upload(csvfile, bucketname, blobname):
     bucket = client.get_bucket(bucketname)
     logging.info(bucket)
     blob = Blob(blobname, bucket)
-    logging.debug('Uploading {} ...'.format(csvfile))
+    logging.debug(f'Uploading {csvfile} ...')
     blob.upload_from_filename(csvfile)
-    gcslocation = 'gs://{}/{}'.format(bucketname, blobname)
-    logging.info('Uploaded {} ...'.format(gcslocation))
+    gcslocation = f'gs://{bucketname}/{blobname}'
+    logging.info(f'Uploaded {gcslocation} ...')
     return gcslocation
 
 
@@ -105,7 +108,7 @@ def bqload(gcsfile, year, month):
     """
     client = bigquery.Client()
     # truncate existing partition ...
-    table_ref = client.dataset('dsongcp').table('flights_raw${}{}'.format(year, month))
+    table_ref = client.dataset('dsongcp').table(f'flights_raw${year}{month}')
     job_config = bigquery.LoadJobConfig()
     job_config.source_format = 'CSV'
     job_config.write_disposition = 'WRITE_TRUNCATE'
@@ -136,11 +139,11 @@ def ingest(year, month, bucket):
     try:
         zipfile = download(year, month, tempdir)
         bts_csv = zip_to_csv(zipfile, tempdir)
-        gcsloc = 'flights/raw/{}{}.csv.gz'.format(year, month)
+        gcsloc = f'flights/raw/{year}{month}.csv.gz'
         gcsloc = upload(bts_csv, bucket, gcsloc)
         return bqload(gcsloc, year, month)
     finally:
-        logging.debug('Cleaning up by removing {}'.format(tempdir))
+        logging.debug(f'Cleaning up by removing {tempdir}')
         shutil.rmtree(tempdir)
 
 
@@ -153,7 +156,7 @@ def next_month(bucketname):
     blobs = list(bucket.list_blobs(prefix='flights/raw/'))
     files = [blob.name for blob in blobs if 'csv' in blob.name]  # csv files only
     lastfile = os.path.basename(files[-1])
-    logging.debug('The latest file on GCS is {}'.format(lastfile))
+    logging.debug(f'The latest file on GCS is {lastfile}')
     year = lastfile[:4]
     month = lastfile[4:6]
     return compute_next_month(year, month)
@@ -162,8 +165,8 @@ def next_month(bucketname):
 def compute_next_month(year, month):
     dt = datetime.datetime(int(year), int(month), 15)  # 15th of month
     dt = dt + datetime.timedelta(30)  # will always go to next month
-    logging.debug('The next month is {}'.format(dt))
-    return '{}'.format(dt.year), '{:02d}'.format(dt.month)
+    logging.debug(f'The next month is {dt}')
+    return f'{dt.year}', '{:02d}'.format(dt.month)
 
 
 if __name__ == '__main__':
@@ -187,8 +190,8 @@ if __name__ == '__main__':
         else:
             year_ = args.year
             month_ = args.month
-        logging.debug('Ingesting year={} month={}'.format(year_, month_))
+        logging.debug(f'Ingesting year={year_} month={month_}')
         tableref, numrows = ingest(year_, month_, args.bucket)
-        logging.info('Success ... ingested {} rows to {}'.format(numrows, tableref))
+        logging.info(f'Success ... ingested {numrows} rows to {tableref}')
     except Exception as e:
         logging.exception("Try again later?")

@@ -28,8 +28,7 @@ def dict_to_csv(f):
     try:
         yield ','.join([str(x) for x in f.values()])
     except Exception as e:
-        logging.warning('Ignoring {} because: {}'.format(f, e), exc_info=True)
-        pass
+        logging.warning(f'Ignoring {f} because: {e}', exc_info=True)
 
 
 def run(project, bucket, region, input):
@@ -40,28 +39,27 @@ def run(project, bucket, region, input):
         ]
         flights_output = '/tmp/'
     else:
-        logging.info('Running in the cloud on full dataset input={}'.format(input))
+        logging.info(f'Running in the cloud on full dataset input={input}')
         argv = [
             '--project={0}'.format(project),
             '--job_name=ch11traindata',
-            # '--save_main_session', # not needed as we are running as a package now
             '--staging_location=gs://{0}/flights/staging/'.format(bucket),
             '--temp_location=gs://{0}/flights/temp/'.format(bucket),
             '--setup_file=./setup.py',
             '--autoscaling_algorithm=THROUGHPUT_BASED',
             '--max_num_workers=20',
-            # '--max_num_workers=4', '--worker_machine_type=m1-ultramem-40', '--disk_size_gb=500',  # for full 2015-2019 dataset
-            '--region={}'.format(region),
-            '--runner=DataflowRunner'
+            f'--region={region}',
+            '--runner=DataflowRunner',
         ]
-        flights_output = 'gs://{}/ch11/data/'.format(bucket)
+
+        flights_output = f'gs://{bucket}/ch11/data/'
 
     with beam.Pipeline(argv=argv) as pipeline:
 
         # read the event stream
         if input == 'local':
             input_file = './alldata_sample.json'
-            logging.info("Reading from {} ... Writing to {}".format(input_file, flights_output))
+            logging.info(f"Reading from {input_file} ... Writing to {flights_output}")
             events = (
                     pipeline
                     | 'read_input' >> beam.io.ReadFromText(input_file)
@@ -69,13 +67,13 @@ def run(project, bucket, region, input):
             )
         elif input == 'bigquery':
             input_table = 'dsongcp.flights_tzcorr'
-            logging.info("Reading from {} ... Writing to {}".format(input_table, flights_output))
+            logging.info(f"Reading from {input_table} ... Writing to {flights_output}")
             events = (
                     pipeline
                     | 'read_input' >> beam.io.ReadFromBigQuery(table=input_table)
             )
         else:
-            logging.error("Unknown input type {}".format(input))
+            logging.error(f"Unknown input type {input}")
             return
 
         # events -> features.  See ./flights_transforms.py for the code shared between training & prediction
@@ -92,14 +90,19 @@ def run(project, bucket, region, input):
         for split in ['ALL', 'TRAIN', 'VALIDATE', 'TEST']:
             feats = features
             if split != 'ALL':
-                feats = feats | 'only_{}'.format(split) >> beam.Filter(lambda f: f['data_split'] == split)
-            (
-                feats
-                | '{}_to_string'.format(split) >> beam.FlatMap(dict_to_csv)
-                | '{}_to_gcs'.format(split) >> beam.io.textio.WriteToText(os.path.join(flights_output, split.lower()),
-                                                                          file_name_suffix='.csv', header=CSV_HEADER,
-                                                                          # workaround b/207384805
-                                                                          num_shards=1)
+                feats = feats | f'only_{split}' >> beam.Filter(
+                    lambda f: f['data_split'] == split
+                )
+
+            (feats | f'{split}_to_string' >> beam.FlatMap(dict_to_csv)) | (
+                f'{split}_to_gcs'
+                >> beam.io.textio.WriteToText(
+                    os.path.join(flights_output, split.lower()),
+                    file_name_suffix='.csv',
+                    header=CSV_HEADER,
+                    # workaround b/207384805
+                    num_shards=1,
+                )
             )
 
 
@@ -115,10 +118,11 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     args = vars(parser.parse_args())
 
-    if args['input'] != 'local':
-        if not args['bucket'] or not args['project'] or not args['region']:
-            print("Project, Bucket, Region are needed in order to run on the cloud on full dataset.")
-            parser.print_help()
-            parser.exit()
+    if args['input'] != 'local' and (
+        not args['bucket'] or not args['project'] or not args['region']
+    ):
+        print("Project, Bucket, Region are needed in order to run on the cloud on full dataset.")
+        parser.print_help()
+        parser.exit()
 
     run(project=args['project'], bucket=args['bucket'], region=args['region'], input=args['input'])

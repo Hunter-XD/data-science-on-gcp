@@ -24,14 +24,14 @@ DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%S'
 
 def compute_stats(airport, events):
     arrived = [event['ARR_DELAY'] for event in events if event['EVENT_TYPE'] == 'arrived']
-    avg_arr_delay = float(np.mean(arrived)) if len(arrived) > 0 else None
+    avg_arr_delay = float(np.mean(arrived)) if arrived else None
 
     departed = [event['DEP_DELAY'] for event in events if event['EVENT_TYPE'] == 'departed']
-    avg_dep_delay = float(np.mean(departed)) if len(departed) > 0 else None
+    avg_dep_delay = float(np.mean(departed)) if departed else None
 
     num_flights = len(events)
-    start_time = min([event['EVENT_TIME'] for event in events])
-    latest_time = max([event['EVENT_TIME'] for event in events])
+    start_time = min(event['EVENT_TIME'] for event in events)
+    latest_time = max(event['EVENT_TIME'] for event in events)
 
     return {
         'AIRPORT': airport,
@@ -60,21 +60,27 @@ def run(project, bucket, region):
         '--temp_location=gs://{0}/flights/temp/'.format(bucket),
         '--autoscaling_algorithm=THROUGHPUT_BASED',
         '--max_num_workers=8',
-        '--region={}'.format(region),
-        '--runner=DataflowRunner'
+        f'--region={region}',
+        '--runner=DataflowRunner',
     ]
+
 
     with beam.Pipeline(argv=argv) as pipeline:
         events = {}
 
         for event_name in ['arrived', 'departed']:
-            topic_name = "projects/{}/topics/{}".format(project, event_name)
+            topic_name = f"projects/{project}/topics/{event_name}"
 
-            events[event_name] = (pipeline
-                                  | 'read:{}'.format(event_name) >> beam.io.ReadFromPubSub(
-                                                topic=topic_name, timestamp_attribute='EventTimeStamp')
-                                  | 'parse:{}'.format(event_name) >> beam.Map(lambda s: json.loads(s))
-                                  )
+            events[event_name] = (
+                pipeline
+                | (
+                    f'read:{event_name}'
+                    >> beam.io.ReadFromPubSub(
+                        topic=topic_name, timestamp_attribute='EventTimeStamp'
+                    )
+                )
+            ) | f'parse:{event_name}' >> beam.Map(lambda s: json.loads(s))
+
 
         all_events = (events['arrived'], events['departed']) | beam.Flatten()
 
