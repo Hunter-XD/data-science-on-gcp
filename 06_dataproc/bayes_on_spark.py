@@ -28,15 +28,17 @@ def run_bayes(BUCKET):
         .getOrCreate()
 
     # read flights data
-    inputs = 'gs://{}/flights/tzcorr/all_flights-*'.format(BUCKET)  # FULL
+    inputs = f'gs://{BUCKET}/flights/tzcorr/all_flights-*'
     flights = spark.read.json(inputs)
     flights.createOrReplaceTempView('flights')
 
     # which days are training days?
-    traindays = spark.read \
-        .option("header", "true") \
-        .option("inferSchema", "true") \
-        .csv('gs://{}/flights/trainday.csv'.format(BUCKET))
+    traindays = (
+        spark.read.option("header", "true")
+        .option("inferSchema", "true")
+        .csv(f'gs://{BUCKET}/flights/trainday.csv')
+    )
+
     traindays.createOrReplaceTempView('traindays')
 
     # create training dataset
@@ -61,12 +63,12 @@ def run_bayes(BUCKET):
     distthresh = flights.approxQuantile('distance', list(np.arange(0, 1.0, 0.2)), 0.02)
     distthresh[-1] = float('inf')
     delaythresh = range(10, 20)
-    logging.info("Computed distance thresholds: {}".format(distthresh))
+    logging.info(f"Computed distance thresholds: {distthresh}")
 
     # bayes in each bin
     df = pd.DataFrame(columns=['dist_thresh', 'delay_thresh', 'frac_ontime'])
-    for m in range(0, len(distthresh) - 1):
-        for n in range(0, len(delaythresh) - 1):
+    for m in range(len(distthresh) - 1):
+        for n in range(len(delaythresh) - 1):
             bdf = flights[(flights['distance'] >= distthresh[m])
                           & (flights['distance'] < distthresh[m + 1])
                           & (flights['dep_delay'] >= delaythresh[n])
@@ -82,8 +84,8 @@ def run_bayes(BUCKET):
     # lookup table
     df['score'] = abs(df['frac_ontime'] - 0.7)
     bayes = df.sort_values(['score']).groupby('dist_thresh').head(1).sort_values('dist_thresh')
-    bayes.to_csv('gs://{}/flights/bayes.csv'.format(BUCKET), index=False)
-    logging.info("Wrote lookup table: {}".format(bayes.head()))
+    bayes.to_csv(f'gs://{BUCKET}/flights/bayes.csv', index=False)
+    logging.info(f"Wrote lookup table: {bayes.head()}")
 
 
 if __name__ == '__main__':

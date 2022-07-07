@@ -36,9 +36,9 @@ def ingest_flights():
 
         if year is None or month is None or len(year) == 0 or len(month) == 0:
             year, month = next_month(bucket)
-        logging.debug('Ingesting year={} month={}'.format(year, month))
+        logging.debug(f'Ingesting year={year} month={month}')
         tableref, numrows = ingest(year, month, bucket)
-        ok = 'Success ... ingested {} rows to {}'.format(numrows, tableref)
+        ok = f'Success ... ingested {numrows} rows to {tableref}'
         logging.info(ok)
         return ok
     except Exception as e:

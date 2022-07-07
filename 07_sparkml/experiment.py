@@ -28,10 +28,7 @@ def get_category(hour):
         return [1, 0, 0]  # night
     if hour < 10:
         return [0, 1, 0]  # morning
-    if hour < 17:
-        return [0, 0, 1]  # mid-day
-    else:
-        return [0, 0, 0]  # evening
+    return [0, 0, 1] if hour < 17 else [0, 0, 0]
 
 
 def get_local_hour(timestamp, correction):

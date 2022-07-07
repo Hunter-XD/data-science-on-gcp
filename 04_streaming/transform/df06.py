@@ -39,29 +39,27 @@ def as_utc(date, hhmm, tzone):
     Returns date corrected for timezone, and the tzoffset
     """
     try:
-        if len(hhmm) > 0 and tzone is not None:
-            import datetime, pytz
-            loc_tz = pytz.timezone(tzone)
-            loc_dt = loc_tz.localize(datetime.datetime.strptime(date, '%Y-%m-%d'), is_dst=False)
-            # can't just parse hhmm because the data contains 2400 and the like ...
-            loc_dt += datetime.timedelta(hours=int(hhmm[:2]), minutes=int(hhmm[2:]))
-            utc_dt = loc_dt.astimezone(pytz.utc)
-            return utc_dt.strftime(DATETIME_FORMAT), loc_dt.utcoffset().total_seconds()
-        else:
+        if len(hhmm) <= 0 or tzone is None:
             return '', 0  # empty string corresponds to canceled flights
+        import datetime, pytz
+        loc_tz = pytz.timezone(tzone)
+        loc_dt = loc_tz.localize(datetime.datetime.strptime(date, '%Y-%m-%d'), is_dst=False)
+        # can't just parse hhmm because the data contains 2400 and the like ...
+        loc_dt += datetime.timedelta(hours=int(hhmm[:2]), minutes=int(hhmm[2:]))
+        utc_dt = loc_dt.astimezone(pytz.utc)
+        return utc_dt.strftime(DATETIME_FORMAT), loc_dt.utcoffset().total_seconds()
     except ValueError as e:
-        logging.exception('{} {} {}'.format(date, hhmm, tzone))
+        logging.exception(f'{date} {hhmm} {tzone}')
         raise e
 
 
 def add_24h_if_before(arrtime, deptime):
     import datetime
-    if len(arrtime) > 0 and len(deptime) > 0 and arrtime < deptime:
-        adt = datetime.datetime.strptime(arrtime, DATETIME_FORMAT)
-        adt += datetime.timedelta(hours=24)
-        return adt.strftime(DATETIME_FORMAT)
-    else:
+    if len(arrtime) <= 0 or len(deptime) <= 0 or arrtime >= deptime:
         return arrtime
+    adt = datetime.datetime.strptime(arrtime, DATETIME_FORMAT)
+    adt += datetime.timedelta(hours=24)
+    return adt.strftime(DATETIME_FORMAT)
 
 
 def tz_correct(fields, airport_timezones):
@@ -132,8 +130,8 @@ def run(project, bucket):
         '--temp_location=gs://{0}/flights/temp/'.format(bucket),
         '--runner=DirectRunner'
     ]
-    airports_filename = 'gs://{}/flights/airports/airports.csv.gz'.format(bucket)
-    flights_output = 'gs://{}/flights/tzcorr/all_flights'.format(bucket)
+    airports_filename = f'gs://{bucket}/flights/airports/airports.csv.gz'
+    flights_output = f'gs://{bucket}/flights/tzcorr/all_flights'
 
     with beam.Pipeline(argv=argv) as pipeline:
         airports = (pipeline
@@ -153,7 +151,7 @@ def run(project, bucket):
          | 'flights:tostring' >> beam.Map(lambda fields: json.dumps(fields))
          | 'flights:gcsout' >> beam.io.textio.WriteToText(flights_output)
          )
-        
+
         flights_schema = ','.join([
             'FL_DATE:date',
             'UNIQUE_CARRIER:string',
@@ -181,10 +179,10 @@ def run(project, bucket):
             'ARR_AIRPORT_LON:float',
             'ARR_AIRPORT_TZOFFSET:float',
             'Year:string'])
-        
+
         # autodetect on JSON works, but is less reliable
         #flights_schema = 'SCHEMA_AUTODETECT'
-        
+
         (flights 
          | 'flights:bqout' >> beam.io.WriteToBigQuery(
                 'dsongcp.flights_tzcorr', 
@@ -193,7 +191,7 @@ def run(project, bucket):
                 create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED
                 )
         )
-        
+
         events = flights | beam.FlatMap(get_next_event)
         events_schema = ','.join([flights_schema, 'EVENT_TYPE:string,EVENT_TIME:timestamp,EVENT_DATA:string'])
 

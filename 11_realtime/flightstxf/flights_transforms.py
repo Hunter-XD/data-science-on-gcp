@@ -30,26 +30,20 @@ def get_data_split(fl_date):
     # Use farm fingerprint just like in BigQuery
     x = np.abs(np.uint64(farmhash.fingerprint64(fl_date_str)).astype('int64') % 100)
     if x < 60:
-        data_split = 'TRAIN'
+        return 'TRAIN'
     elif x < 80:
-        data_split = 'VALIDATE'
+        return 'VALIDATE'
     else:
-        data_split = 'TEST'
-    return data_split
+        return 'TEST'
 
 
 def get_data_split_2019(fl_date):
     fl_date_str = str(fl_date)
     if fl_date_str > '2019':
-        data_split = 'TEST'
-    else:
-        # Use farm fingerprint just like in BigQuery
-        x = np.abs(np.uint64(farmhash.fingerprint64(fl_date_str)).astype('int64') % 100)
-        if x < 95:
-            data_split = 'TRAIN'
-        else:
-            data_split = 'VALIDATE'
-    return data_split
+        return 'TEST'
+    # Use farm fingerprint just like in BigQuery
+    x = np.abs(np.uint64(farmhash.fingerprint64(fl_date_str)).astype('int64') % 100)
+    return 'TRAIN' if x < 95 else 'VALIDATE'
 
 
 def to_datetime(event_time):
@@ -83,22 +77,26 @@ def create_features_and_label(event, for_training):
         model_input = {}
 
         if for_training:
-            model_input.update({
-                'ontime': 1.0 if float(event['ARR_DELAY'] or 0) < 15 else 0,
-            })
+            model_input['ontime'] = 1.0 if float(event['ARR_DELAY'] or 0) < 15 else 0
 
         # features for both training and prediction
-        model_input.update({
+        model_input |= {
             # same as in ch9
             'dep_delay': event['DEP_DELAY'],
             'taxi_out': event['TAXI_OUT'],
             # distance is not in wheelsoff
-            'distance': approx_miles_between(event['DEP_AIRPORT_LAT'], event['DEP_AIRPORT_LON'],
-                                             event['ARR_AIRPORT_LAT'], event['ARR_AIRPORT_LON']),
+            'distance': approx_miles_between(
+                event['DEP_AIRPORT_LAT'],
+                event['DEP_AIRPORT_LON'],
+                event['ARR_AIRPORT_LAT'],
+                event['ARR_AIRPORT_LON'],
+            ),
             'origin': event['ORIGIN'],
             'dest': event['DEST'],
             'dep_hour': to_datetime(event['DEP_TIME']).hour,
-            'is_weekday': 1.0 if to_datetime(event['DEP_TIME']).isoweekday() < 6 else 0.0,
+            'is_weekday': 1.0
+            if to_datetime(event['DEP_TIME']).isoweekday() < 6
+            else 0.0,
             'carrier': event['UNIQUE_CARRIER'],
             'dep_airport_lat': event['DEP_AIRPORT_LAT'],
             'dep_airport_lon': event['DEP_AIRPORT_LON'],
@@ -107,30 +105,23 @@ def create_features_and_label(event, for_training):
             # newly computed averages
             'avg_dep_delay': event['AVG_DEP_DELAY'],
             'avg_taxi_out': event['AVG_TAXI_OUT'],
+        }
 
-        })
 
         if for_training:
-            model_input.update({
-                # training data split
-                'data_split': get_data_split(event['FL_DATE'])
-            })
+            model_input['data_split'] = get_data_split(event['FL_DATE'])
         else:
-            model_input.update({
-                # prediction output should include timestamp
-                'event_time': event['WHEELS_OFF']
-            })
+            model_input['event_time'] = event['WHEELS_OFF']
 
         yield model_input
     except Exception as e:
         # if any key is not present, don't use for training
-        logging.warning('Ignoring {} because: {}'.format(event, e), exc_info=True)
-        pass
+        logging.warning(f'Ignoring {event} because: {e}', exc_info=True)
 
 
 def compute_mean(events, col_name):
     values = [float(event[col_name]) for event in events if col_name in event and event[col_name]]
-    return float(np.mean(values)) if len(values) > 0 else None
+    return float(np.mean(values)) if values else None
 
 
 def add_stats(element, window=beam.DoFn.WindowParam):
@@ -177,14 +168,15 @@ def transform_events_to_features(events, for_training=True):
     events = events | 'assign_time' >> beam.FlatMap(assign_timestamp)
     events = events | 'remove_cancelled' >> beam.Filter(is_normal_operation)
 
-    # compute stats by airport, and add to events
-    features = (
-            events
-            | 'window' >> beam.WindowInto(beam.window.SlidingWindows(WINDOW_DURATION, WINDOW_EVERY))
-            | 'by_airport' >> beam.Map(lambda x: (x['ORIGIN'], x))
-            | 'group_by_airport' >> beam.GroupByKey()
-            | 'events_and_stats' >> beam.FlatMap(add_stats)
-            | 'events_to_features' >> beam.FlatMap(lambda x: create_features_and_label(x, for_training))
+    return (
+        events
+        | 'window'
+        >> beam.WindowInto(
+            beam.window.SlidingWindows(WINDOW_DURATION, WINDOW_EVERY)
+        )
+        | 'by_airport' >> beam.Map(lambda x: (x['ORIGIN'], x))
+        | 'group_by_airport' >> beam.GroupByKey()
+        | 'events_and_stats' >> beam.FlatMap(add_stats)
+        | 'events_to_features'
+        >> beam.FlatMap(lambda x: create_features_and_label(x, for_training))
     )
-
-    return features

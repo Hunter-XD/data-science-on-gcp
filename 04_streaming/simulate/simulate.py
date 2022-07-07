@@ -31,17 +31,16 @@ def publish(publisher, topics, allevents, notify_time):
       topic = topics[key]
       events = allevents[key]
       # the client automatically batches
-      logging.info('Publishing {} {} till {}'.format(len(events), key, timestamp))
+      logging.info(f'Publishing {len(events)} {key} till {timestamp}')
       for event_data in events:
           publisher.publish(topic, event_data.encode(), EventTimeStamp=timestamp)
 
 def notify(publisher, topics, rows, simStartTime, programStart, speedFactor):
    # sleep computation
    def compute_sleep_secs(notify_time):
-        time_elapsed = (datetime.datetime.utcnow() - programStart).total_seconds()
-        sim_time_elapsed = (notify_time - simStartTime).total_seconds() / speedFactor
-        to_sleep_secs = sim_time_elapsed - time_elapsed
-        return to_sleep_secs
+      time_elapsed = (datetime.datetime.utcnow() - programStart).total_seconds()
+      sim_time_elapsed = (notify_time - simStartTime).total_seconds() / speedFactor
+      return sim_time_elapsed - time_elapsed
 
    tonotify = {}
    for key in topics:
@@ -118,17 +117,17 @@ ORDER BY
    publisher = pubsub.PublisherClient()
    topics = {}
    for event_type in ['wheelsoff', 'arrived', 'departed']:
-       topics[event_type] = publisher.topic_path(args.project, event_type)
-       try:
-           publisher.get_topic(topic=topics[event_type])
-           logging.info("Already exists: {}".format(topics[event_type]))
-       except:
-           logging.info("Creating {}".format(topics[event_type]))
-           publisher.create_topic(name=topics[event_type])
+      topics[event_type] = publisher.topic_path(args.project, event_type)
+      try:
+         publisher.get_topic(topic=topics[event_type])
+         logging.info(f"Already exists: {topics[event_type]}")
+      except:
+         logging.info(f"Creating {topics[event_type]}")
+         publisher.create_topic(name=topics[event_type])
 
 
    # notify about each row in the dataset
    programStartTime = datetime.datetime.utcnow()
    simStartTime = datetime.datetime.strptime(args.startTime, TIME_FORMAT).replace(tzinfo=pytz.UTC)
-   logging.info('Simulation start time is {}'.format(simStartTime))
+   logging.info(f'Simulation start time is {simStartTime}')
    notify(publisher, topics, rows, simStartTime, programStartTime, args.speedFactor)

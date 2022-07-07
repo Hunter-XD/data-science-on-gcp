@@ -29,20 +29,23 @@ def run(project, bucket, region):
         '--setup_file=./setup.py',
         '--autoscaling_algorithm=THROUGHPUT_BASED',
         '--max_num_workers=8',
-        '--region={}'.format(region),
-        '--runner=DirectRunner'
+        f'--region={region}',
+        '--runner=DirectRunner',
     ]
+
 
     with beam.Pipeline(argv=argv) as pipeline:
         events = {}
 
         for event_name in ['arrived', 'departed']:
-            topic_name = "projects/{}/topics/{}".format(project, event_name)
+            topic_name = f"projects/{project}/topics/{event_name}"
 
-            events[event_name] = (pipeline
-                                  | 'read:{}'.format(event_name) >> beam.io.ReadFromPubSub(topic=topic_name)
-                                  | 'parse:{}'.format(event_name) >> beam.Map(lambda s: json.loads(s))
-                                  )
+            events[event_name] = (
+                pipeline
+                | f'read:{event_name}'
+                >> beam.io.ReadFromPubSub(topic=topic_name)
+            ) | f'parse:{event_name}' >> beam.Map(lambda s: json.loads(s))
+
 
         all_events = (events['arrived'], events['departed']) | beam.Flatten()
 

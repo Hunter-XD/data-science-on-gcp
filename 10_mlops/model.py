@@ -20,7 +20,7 @@ import numpy as np
 import tensorflow as tf
 
 BUCKET = None
-TF_VERSION = '2-' + tf.__version__[2:3]  # needed to choose container
+TF_VERSION = f'2-{tf.__version__[2:3]}'
 
 DEVELOP_MODE = True
 NUM_EXAMPLES = 5000 * 1000  # doesn't need to be precise but get order of magnitude right.
@@ -85,24 +85,21 @@ def create_model():
 
     inputs = {
         colname: tf.keras.layers.Input(name=colname, shape=(), dtype='float32')
-        for colname in real.keys()
-    }
-    inputs.update({
+        for colname in real
+    } | {
         colname: tf.keras.layers.Input(name=colname, shape=(), dtype='string')
-        for colname in sparse.keys()
-    })
+        for colname in sparse
+    }
 
     latbuckets = np.linspace(20.0, 50.0, NUM_BUCKETS).tolist()  # USA
     lonbuckets = np.linspace(-120.0, -70.0, NUM_BUCKETS).tolist()  # USA
-    disc = {}
-    disc.update({
-        'd_{}'.format(key): tf.feature_column.bucketized_column(real[key], latbuckets)
+    disc = {
+        f'd_{key}': tf.feature_column.bucketized_column(real[key], latbuckets)
         for key in ['dep_airport_lat', 'arr_airport_lat']
-    })
-    disc.update({
-        'd_{}'.format(key): tf.feature_column.bucketized_column(real[key], lonbuckets)
+    } | {
+        f'd_{key}': tf.feature_column.bucketized_column(real[key], lonbuckets)
         for key in ['dep_airport_lon', 'arr_airport_lon']
-    })
+    }
 
     # cross columns that make sense in combination
     sparse['dep_loc'] = tf.feature_column.crossed_column(
@@ -113,10 +110,11 @@ def create_model():
 
     # embed all the sparse columns
     embed = {
-        'embed_{}'.format(colname): tf.feature_column.embedding_column(col, NUM_EMBEDS)
+        f'embed_{colname}': tf.feature_column.embedding_column(col, NUM_EMBEDS)
         for colname, col in sparse.items()
     }
-    real.update(embed)
+
+    real |= embed
 
     # one-hot encode the sparse columns
     sparse = {
@@ -124,20 +122,22 @@ def create_model():
         for colname, col in sparse.items()
     }
 
-    model = wide_and_deep_classifier(
+    return wide_and_deep_classifier(
         inputs,
         linear_feature_columns=sparse.values(),
         dnn_feature_columns=real.values(),
-        dnn_hidden_units=DNN_HIDDEN_UNITS)
-
-    return model
+        dnn_hidden_units=DNN_HIDDEN_UNITS,
+    )
 
 
 def wide_and_deep_classifier(inputs, linear_feature_columns, dnn_feature_columns, dnn_hidden_units):
     deep = tf.keras.layers.DenseFeatures(dnn_feature_columns, name='deep_inputs')(inputs)
     layers = [int(x) for x in dnn_hidden_units.split(',')]
     for layerno, numnodes in enumerate(layers):
-        deep = tf.keras.layers.Dense(numnodes, activation='relu', name='dnn_{}'.format(layerno + 1))(deep)
+        deep = tf.keras.layers.Dense(
+            numnodes, activation='relu', name=f'dnn_{layerno + 1}'
+        )(deep)
+
     wide = tf.keras.layers.DenseFeatures(linear_feature_columns, name='wide_inputs')(inputs)
     both = tf.keras.layers.concatenate([deep, wide], name='both')
     output = tf.keras.layers.Dense(1, activation='sigmoid', name='pred')(both)
@@ -182,7 +182,7 @@ def train_and_evaluate(train_data_pattern, eval_data_pattern, test_data_pattern,
     class HpCallback(tf.keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
             if logs and METRIC in logs:
-                logging.info("Epoch {}: {} = {}".format(epoch, METRIC, logs[METRIC]))
+                logging.info(f"Epoch {epoch}: {METRIC} = {logs[METRIC]}")
                 hpt.report_hyperparameter_tuning_metric(hyperparameter_metric_tag=METRIC,
                                                         metric_value=logs[METRIC],
                                                         global_step=epoch)
@@ -214,7 +214,7 @@ def train_and_evaluate(train_data_pattern, eval_data_pattern, test_data_pattern,
 
 
 if __name__ == '__main__':
-    logging.info("Tensorflow version " + tf.__version__)
+    logging.info(f"Tensorflow version {tf.__version__}")
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -285,7 +285,7 @@ if __name__ == '__main__':
 
     # set top-level output directory for checkpoints, etc.
     BUCKET = args['bucket']
-    OUTPUT_DIR = 'gs://{}/ch9/train_output'.format(BUCKET)
+    OUTPUT_DIR = f'gs://{BUCKET}/ch9/train_output'
     # During hyperparameter tuning, we need to make sure different trials don't clobber each other
     # https://cloud.google.com/ai-platform/training/docs/distributed-training-details#tf-config-format
     # This doesn't exist in Vertex AI
@@ -301,21 +301,23 @@ if __name__ == '__main__':
         OUTPUT_DIR = os.path.join(
             os.path.dirname(OUTPUT_MODEL_DIR if OUTPUT_MODEL_DIR[-1] != '/' else OUTPUT_MODEL_DIR[:-1]),
             'train_output')
-    logging.info('Writing checkpoints and other outputs to {}'.format(OUTPUT_DIR))
+    logging.info(f'Writing checkpoints and other outputs to {OUTPUT_DIR}')
 
     # Set default values for the contract variables in case we are not running in Vertex AI Training
     if not OUTPUT_MODEL_DIR:
-        OUTPUT_MODEL_DIR = os.path.join(OUTPUT_DIR,
-                                        'export/flights_{}'.format(time.strftime("%Y%m%d-%H%M%S")))
+        OUTPUT_MODEL_DIR = os.path.join(
+            OUTPUT_DIR, f'export/flights_{time.strftime("%Y%m%d-%H%M%S")}'
+        )
+
     if not TRAIN_DATA_PATTERN:
-        TRAIN_DATA_PATTERN = 'gs://{}/ch9/data/train*'.format(BUCKET)
+        TRAIN_DATA_PATTERN = f'gs://{BUCKET}/ch9/data/train*'
         CSV_COLUMNS.pop()  # the data_split column won't exist
         CSV_COLUMN_TYPES.pop()  # the data_split column won't exist
     if not EVAL_DATA_PATTERN:
-        EVAL_DATA_PATTERN = 'gs://{}/ch9/data/eval*'.format(BUCKET)
-    logging.info('Exporting trained model to {}'.format(OUTPUT_MODEL_DIR))
-    logging.info("Reading training data from {}".format(TRAIN_DATA_PATTERN))
-    logging.info('Writing trained model to {}'.format(OUTPUT_MODEL_DIR))
+        EVAL_DATA_PATTERN = f'gs://{BUCKET}/ch9/data/eval*'
+    logging.info(f'Exporting trained model to {OUTPUT_MODEL_DIR}')
+    logging.info(f"Reading training data from {TRAIN_DATA_PATTERN}")
+    logging.info(f'Writing trained model to {OUTPUT_MODEL_DIR}')
 
     # other global parameters
     NUM_BUCKETS = args['nbuckets']
